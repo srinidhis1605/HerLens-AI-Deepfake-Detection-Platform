@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HerLens - Statistics</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&family=Roboto&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Roboto', sans-serif;
+            background: #0a0a0a;
+            color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            color: #c399ff;
+            text-align: center;
+            font-size: 42px;
+            margin-bottom: 30px;
+            text-shadow: 0 0 15px #c399ff;
+        }
+        .nav-bar {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .nav-link {
+            color: #c399ff;
+            text-decoration: none;
+            margin: 0 15px;
+            padding: 8px 20px;
+            border: 2px solid #c399ff;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+        }
+        .nav-link:hover {
+            background: #c399ff;
+            color: #000;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+        .stat-card {
+            background: linear-gradient(145deg, #111, #1c1c1c);
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            border: 1px solid #c399ff;
+            box-shadow: 0 0 30px rgba(195, 153, 255, 0.2);
+        }
+        .stat-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        .stat-number {
+            font-size: 48px;
+            color: #c399ff;
+            font-weight: bold;
+            font-family: 'Orbitron', sans-serif;
+        }
+        .stat-label {
+            color: #888;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        .chart-container {
+            background: linear-gradient(145deg, #111, #1c1c1c);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid #c399ff;
+            margin-bottom: 30px;
+        }
+        .chart-title {
+            color: #c399ff;
+            font-size: 20px;
+            margin-bottom: 20px;
+            font-family: 'Orbitron', sans-serif;
+        }
+        .progress-bar {
+            height: 30px;
+            background: #333;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b6b, #c399ff);
+            color: white;
+            line-height: 30px;
+            padding-left: 15px;
+            font-size: 14px;
+        }
+        .recent-list {
+            list-style: none;
+            padding: 0;
+        }
+        .recent-item {
+            padding: 15px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .recent-item:hover {
+            background: #1a1a1a;
+        }
+        .recent-risk {
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-bar">
+            <a href="/" class="nav-link">🏠 Home</a>
+            <a href="/history" class="nav-link">🗂 History</a>
+            <a href="/stats" class="nav-link">📈 Statistics</a>
+            <a href="/verify-timestamp" class="nav-link">🔎 Verify</a>
+        </div>
+        <h1>📈 HerLens Statistics</h1>
+
+        <!-- Main Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon">👥</div>
+                <div class="stat-number">{{ total_users }}</div>
+                <div class="stat-label">Total Users</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-icon">📸</div>
+                <div class="stat-number">{{ total_analyses }}</div>
+                <div class="stat-label">Total Analyses</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-icon">⚠️</div>
+                <div class="stat-number">{{ high_risk }}</div>
+                <div class="stat-label">High Risk Detected</div>
+            </div>
+            
+            <div class="stat-card">
+                <div class="stat-icon">✅</div>
+                <div class="stat-number">{{ safe }}</div>
+                <div class="stat-label">Safe Content</div>
+            </div>
+        </div>
+
+        <!-- Risk Distribution Chart -->
+        <div class="chart-container">
+            <div class="chart-title">Risk Distribution</div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: {% if total_analyses > 0 %}{{ (high_risk / total_analyses * 100)|round }}%{% else %}0%{% endif %};">
+                    High Risk: {{ high_risk }}
+                </div>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: {% if total_analyses > 0 %}{{ (safe / total_analyses * 100)|round }}%{% else %}0%{% endif %}; background: #4caf50;">
+                    Safe: {{ safe }}
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Analyses -->
+        <div class="chart-container">
+            <div class="chart-title">Recent Activity</div>
+            <ul class="recent-list">
+                {% for analysis in recent %}
+                <li class="recent-item">
+                    <div>
+                        <strong style="color: #c399ff;">{{ analysis.user.email }}</strong>
+                        <div style="font-size: 12px; color: #888;">{{ analysis.filename }}</div>
+                    </div>
+                    <div>
+                        <span class="recent-risk" style="background: {% if 'HIGH' in analysis.risk_level %}rgba(255,107,107,0.2); color: #ff6b6b;{% else %}rgba(76,175,80,0.2); color: #4caf50;{% endif %}">
+                            {{ analysis.risk_level }}
+                        </span>
+                        <div style="font-size: 11px; color: #666; margin-top: 5px;">
+                            {{ analysis.created_at.strftime('%H:%M %d/%m') }}
+                        </div>
+                    </div>
+                </li>
+                {% else %}
+                <li class="recent-item" style="text-align: center; color: #888;">
+                    No recent activity
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <div class="footer">
+            Database Statistics - Updated in Real Time
+        </div>
+    </div>
+</body>
+</html>

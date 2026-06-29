@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HerLens - Verify Timestamp</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&family=Roboto&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Roboto', sans-serif;
+            background: #0a0a0a;
+            color: #f0f0f0;
+            text-align: center;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            color: #c399ff;
+            font-size: 42px;
+            margin-bottom: 30px;
+            text-shadow: 0 0 15px #c399ff;
+        }
+        .card {
+            background: linear-gradient(145deg, #111, #1c1c1c);
+            border-radius: 25px;
+            padding: 40px 30px;
+            box-shadow: 0 0 40px rgba(195, 153, 255, 0.4);
+            margin: 20px 0;
+            border: 1px solid #c399ff;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 15px 30px;
+            border-radius: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        .status-valid {
+            background: #4caf50;
+            color: white;
+            text-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+        }
+        .status-invalid {
+            background: #ff6b6b;
+            color: white;
+            text-shadow: 0 0 10px rgba(255, 107, 107, 0.5);
+        }
+        .info-table {
+            width: 100%;
+            margin-top: 25px;
+            text-align: left;
+        }
+        .info-row {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            padding: 15px;
+            border-bottom: 1px solid #333;
+        }
+        .info-label {
+            color: #c399ff;
+            font-weight: bold;
+        }
+        .info-value {
+            color: #f0f0f0;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .nav-bar {
+            margin-top: 30px;
+        }
+        .nav-link {
+            color: #c399ff;
+            text-decoration: none;
+            padding: 10px 25px;
+            border: 2px solid #c399ff;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+            display: inline-block;
+            margin: 10px;
+        }
+        .nav-link:hover {
+            background: #c399ff;
+            color: #000;
+        }
+        .verification-details {
+            background: rgba(195, 153, 255, 0.05);
+            border-left: 4px solid #c399ff;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 10px;
+            text-align: left;
+        }
+        .verification-check {
+            padding: 10px 0;
+            font-size: 16px;
+        }
+        .check-pass {
+            color: #4caf50;
+        }
+        .check-fail {
+            color: #ff6b6b;
+        }
+        .error-message {
+            color: #ff6b6b;
+            font-size: 18px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Verify Cryptographic Timestamp</h1>
+        
+        <div class="card">
+            {% if analysis %}
+            <h2 style="color: #c399ff;">Analysis #{{ analysis.id }}</h2>
+            {% endif %}
+            
+            {% if is_valid %}
+                <div class="status-badge status-valid">✅ SIGNATURE VALID</div>
+                <p style="color: #4caf50; font-size: 18px;">
+                    This report is authentic. The hash and signature match a valid HerLens analysis
+                    and the signed data has not been tampered with.
+                </p>
+            {% else %}
+                <div class="status-badge status-invalid">❌ SIGNATURE INVALID</div>
+                {% if error_message %}
+                <p class="error-message">{{ error_message }}</p>
+                {% else %}
+                <p class="error-message">
+                    Warning: Verification failed. The report may be forged or altered.
+                </p>
+                {% endif %}
+            {% endif %}
+
+            <div class="verification-details">
+                <h3 style="color: #c399ff; margin-top: 0;">Verification Results</h3>
+
+                {% if record_found %}
+                <div class="verification-check {% if submitted_hash_valid %}check-pass{% else %}check-fail{% endif %}">
+                    {% if submitted_hash_valid %}✅{% else %}❌{% endif %}
+                    Submitted Document Hash: {% if submitted_hash_valid %}Matches{% else %}Does not match{% endif %}
+                </div>
+                
+                <div class="verification-check {% if submitted_signature_valid %}check-pass{% else %}check-fail{% endif %}">
+                    {% if submitted_signature_valid %}✅{% else %}❌{% endif %}
+                    Submitted Digital Signature: {% if submitted_signature_valid %}Matches{% else %}Does not match{% endif %}
+                </div>
+
+                <div class="verification-check {% if hash_valid %}check-pass{% else %}check-fail{% endif %}">
+                    {% if hash_valid %}✅{% else %}❌{% endif %}
+                    Document Hash Integrity: {% if hash_valid %}Valid{% else %}Invalid{% endif %}
+                </div>
+                
+                <div class="verification-check {% if signature_valid %}check-pass{% else %}check-fail{% endif %}">
+                    {% if signature_valid %}✅{% else %}❌{% endif %}
+                    Digital Signature: {% if signature_valid %}Valid{% else %}Invalid{% endif %}
+                </div>
+
+                {% if analysis %}
+                <div class="verification-check {% if db_integrity_valid %}check-pass{% else %}check-fail{% endif %}">
+                    {% if db_integrity_valid %}✅{% else %}❌{% endif %}
+                    Stored Analysis Data: {% if db_integrity_valid %}Matches signed payload{% else %}Modified after signing{% endif %}
+                </div>
+                {% endif %}
+                {% else %}
+                <div class="verification-check check-fail">
+                    ❌ Record Lookup: No matching analysis found in the system
+                </div>
+                {% endif %}
+                
+                <div class="verification-check">
+                    🕐 Verification Time: {{ verification_time }}
+                </div>
+            </div>
+
+            {% if analysis and stored_timestamp %}
+            <h3 style="color: #c399ff;">Analysis Details</h3>
+            <table class="info-table">
+                <tr class="info-row">
+                    <td class="info-label">File Name:</td>
+                    <td class="info-value">{{ stored_timestamp.data.filename }}</td>
+                </tr>
+                <tr class="info-row">
+                    <td class="info-label">Risk Level:</td>
+                    <td class="info-value">{{ stored_timestamp.data.risk_level }}</td>
+                </tr>
+                <tr class="info-row">
+                    <td class="info-label">Explicit Confidence:</td>
+                    <td class="info-value">{{ "%.2f"|format(stored_timestamp.data.explicit_confidence) }}%</td>
+                </tr>
+                <tr class="info-row">
+                    <td class="info-label">Deepfake Confidence:</td>
+                    <td class="info-value">{{ "%.2f"|format(stored_timestamp.data.deepfake_confidence) }}%</td>
+                </tr>
+                <tr class="info-row">
+                    <td class="info-label">Signed Timestamp:</td>
+                    <td class="info-value">{{ stored_timestamp.data.timestamp }}</td>
+                </tr>
+                <tr class="info-row">
+                    <td class="info-label">Analysis Date:</td>
+                    <td class="info-value">{{ analysis.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</td>
+                </tr>
+                <tr class="info-row">
+                    <td class="info-label">User Email:</td>
+                    <td class="info-value">{{ stored_timestamp.data.user_email }}</td>
+                </tr>
+            </table>
+
+            <h3 style="color: #c399ff;">Cryptographic Information</h3>
+            <table class="info-table">
+                <tr class="info-row">
+                    <td class="info-label">Document Hash:</td>
+                    <td class="info-value">{{ stored_timestamp.hash }}</td>
+                </tr>
+                <tr class="info-row">
+                    <td class="info-label">Digital Signature:</td>
+                    <td class="info-value">{{ stored_timestamp.signature }}</td>
+                </tr>
+                {% if calculated_hash %}
+                <tr class="info-row">
+                    <td class="info-label">Recalculated Hash:</td>
+                    <td class="info-value">{{ calculated_hash }}</td>
+                </tr>
+                <tr class="info-row">
+                    <td class="info-label">Recalculated Signature:</td>
+                    <td class="info-value">{{ calculated_signature }}</td>
+                </tr>
+                {% endif %}
+            </table>
+            {% endif %}
+        </div>
+
+        <div class="nav-bar">
+            <a href="/verify-timestamp" class="nav-link">← Verify Another</a>
+            <a href="/" class="nav-link">Upload Image</a>
+            <a href="/history" class="nav-link">View All</a>
+        </div>
+    </div>
+</body>
+</html>

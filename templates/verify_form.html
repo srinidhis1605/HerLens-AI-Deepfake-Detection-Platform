@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HerLens - Verify Timestamp</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&family=Roboto&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Roboto', sans-serif;
+            background: #0a0a0a;
+            color: #f0f0f0;
+            text-align: center;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            color: #c399ff;
+            font-size: 42px;
+            margin-bottom: 20px;
+            text-shadow: 0 0 15px #c399ff;
+        }
+        .card {
+            background: linear-gradient(145deg, #111, #1c1c1c);
+            border-radius: 25px;
+            padding: 40px 30px;
+            box-shadow: 0 0 40px rgba(195, 153, 255, 0.4);
+            margin: 20px 0;
+            border: 1px solid #c399ff;
+            text-align: left;
+        }
+        .help-text {
+            color: #bbb;
+            line-height: 1.6;
+            margin-bottom: 25px;
+        }
+        label {
+            display: block;
+            color: #c399ff;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        input[type="text"] {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px 14px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            border: 1px solid #444;
+            background: #111;
+            color: #f0f0f0;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #c399ff;
+            box-shadow: 0 0 10px rgba(195, 153, 255, 0.3);
+        }
+        button {
+            width: 100%;
+            padding: 14px 30px;
+            background: #c399ff;
+            color: #000;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            background: #d4b3ff;
+            box-shadow: 0 0 20px rgba(195, 153, 255, 0.5);
+        }
+        .error-box {
+            background: rgba(255, 107, 107, 0.1);
+            border-left: 4px solid #ff6b6b;
+            color: #ff6b6b;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .nav-bar {
+            margin-top: 30px;
+            text-align: center;
+        }
+        .nav-link {
+            color: #c399ff;
+            text-decoration: none;
+            padding: 10px 25px;
+            border: 2px solid #c399ff;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+            display: inline-block;
+            margin: 10px;
+        }
+        .nav-link:hover {
+            background: #c399ff;
+            color: #000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Verify Cryptographic Timestamp</h1>
+
+        <div class="card">
+            {% if error %}
+            <div class="error-box">{{ error }}</div>
+            {% endif %}
+
+            <p class="help-text">
+                To verify a report, paste the <strong>Document Hash</strong> and
+                <strong>Digital Signature</strong> from section 5 of your PDF report.
+                These values prove the report was issued by HerLens and has not been altered.
+                An analysis number alone cannot be used for verification.
+            </p>
+
+            <form method="post" action="/verify-timestamp">
+                <label for="document_hash">Document Hash</label>
+                <input
+                    type="text"
+                    id="document_hash"
+                    name="document_hash"
+                    placeholder="64-character SHA-256 hash from your PDF"
+                    value="{{ prefilled_hash or '' }}"
+                    required
+                    minlength="64"
+                    maxlength="64"
+                    pattern="[a-fA-F0-9]{64}"
+                    autocomplete="off"
+                >
+
+                <label for="digital_signature">Digital Signature</label>
+                <input
+                    type="text"
+                    id="digital_signature"
+                    name="digital_signature"
+                    placeholder="64-character HMAC signature from your PDF"
+                    value="{{ prefilled_signature or '' }}"
+                    required
+                    minlength="64"
+                    maxlength="64"
+                    pattern="[a-fA-F0-9]{64}"
+                    autocomplete="off"
+                >
+
+                <button type="submit">Verify Timestamp</button>
+            </form>
+        </div>
+
+        <div class="nav-bar">
+            <a href="/" class="nav-link">Upload Image</a>
+            <a href="/history" class="nav-link">View All</a>
+        </div>
+    </div>
+</body>
+</html>

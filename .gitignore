@@ -1,0 +1,68 @@
+# ============== Secrets & environment ==============
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ============== Python ==============
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ============== Virtual environments ==============
+venv/
+.venv/
+env/
+ENV/
+
+# ============== Flask / databases ==============
+instance/
+*.db
+*.sqlite
+*.sqlite3
+
+# ============== User content (PII / sensitive media) ==============
+uploads/
+static/uploads/
+*.pdf
+
+# ============== Logs & runtime ==============
+*.log
+logs/
+.flask_session/
+
+# ============== Tests & tooling ==============
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ============== ML model caches ==============
+.deepface/
+.keras/
+*.h5
+*.weights
+
+# ============== IDE & OS ==============
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============== Credentials (never commit) ==============
+credentials.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
