@@ -961,6 +961,274 @@ def generate_report(filepath, filename, detection_results, face_analysis, image_
     os.remove(temp_report_path)
     return report_path, file_hash
 
+# ============= OPENCV FACE DETECTION (NO TENSORFLOW REQUIRED) =============
+DEEPFAKE_ENGINE_VERSION = 'opencv-yunet-v2'
+_APP_ROOT = Path(__file__).resolve().parent
+_YUNET_MODEL_PATH = str(_APP_ROOT / 'models' / 'face_detection_yunet_2023mar.onnx')
+_LEGACY_YUNET_MODEL_PATH = str(_APP_ROOT / 'instance' / 'models' / 'face_detection_yunet_2023mar.onnx')
+_YUNET_MODEL_URL = (
+    'https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/'
+    'face_detection_yunet_2023mar.onnx'
+)
+_OPENCV_FACE_CASCADE = None
+_OPENCV_PROFILE_CASCADE = None
+_YUNET_DETECTOR = None
+
+def _ensure_yunet_model():
+    if os.path.exists(_YUNET_MODEL_PATH):
+        return _YUNET_MODEL_PATH
+    if os.path.exists(_LEGACY_YUNET_MODEL_PATH):
+        os.makedirs(os.path.dirname(_YUNET_MODEL_PATH), exist_ok=True)
+        import shutil
+        shutil.copy2(_LEGACY_YUNET_MODEL_PATH, _YUNET_MODEL_PATH)
+        return _YUNET_MODEL_PATH
+    os.makedirs(os.path.dirname(_YUNET_MODEL_PATH), exist_ok=True)
+    try:
+        import urllib.request
+        logger.info('Downloading OpenCV YuNet face model (one-time)...')
+        urllib.request.urlretrieve(_YUNET_MODEL_URL, _YUNET_MODEL_PATH)
+        return _YUNET_MODEL_PATH
+    except Exception as e:
+        logger.error('YuNet model download failed: %s', e)
+        return None
+
+def detect_faces_yunet(img):
+    """Detect faces with OpenCV YuNet DNN (accurate, no TensorFlow)."""
+    global _YUNET_DETECTOR
+    if not hasattr(cv2, 'FaceDetectorYN'):
+        return []
+
+    model_path = _ensure_yunet_model()
+    if not model_path:
+        return []
+
+    height, width = img.shape[:2]
+    if _YUNET_DETECTOR is None:
+        _YUNET_DETECTOR = cv2.FaceDetectorYN.create(model_path, '', (320, 320), 0.6, 0.3, 5000)
+
+    _YUNET_DETECTOR.setInputSize((width, height))
+    _, faces = _YUNET_DETECTOR.detect(img)
+    if faces is None:
+        return []
+
+    boxes = []
+    for face in faces:
+        x, y, w, h = face[:4]
+        if w > 20 and h > 20:
+            boxes.append((int(x), int(y), int(w), int(h)))
+    return boxes
+
+def _get_opencv_cascade(kind='frontal'):
+    global _OPENCV_FACE_CASCADE, _OPENCV_PROFILE_CASCADE
+    if kind == 'profile':
+        if _OPENCV_PROFILE_CASCADE is None:
+            path = os.path.join(cv2.data.haarcascades, 'haarcascade_profileface.xml')
+            _OPENCV_PROFILE_CASCADE = cv2.CascadeClassifier(path)
+        return _OPENCV_PROFILE_CASCADE
+    if _OPENCV_FACE_CASCADE is None:
+        path = os.path.join(cv2.data.haarcascades, 'haarcascade_frontalface_default.xml')
+        _OPENCV_FACE_CASCADE = cv2.CascadeClassifier(path)
+    return _OPENCV_FACE_CASCADE
+
+def detect_faces_opencv(gray, img_bgr=None):
+    """Detect faces using YuNet DNN, then OpenCV Haar cascades."""
+    if img_bgr is not None:
+        yunet_faces = detect_faces_yunet(img_bgr)
+        if yunet_faces:
+            return yunet_faces
+
+    detected = []
+    variants = [gray]
+    try:
+        variants.append(cv2.equalizeHist(gray))
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        variants.append(clahe.apply(gray))
+    except Exception:
+        pass
+
+    for variant in variants:
+        for kind in ('frontal', 'profile'):
+            cascade = _get_opencv_cascade(kind)
+            if cascade.empty():
+                continue
+            for scale_factor, min_neighbors in ((1.05, 3), (1.1, 4), (1.15, 5)):
+                faces = cascade.detectMultiScale(
+                    variant,
+                    scaleFactor=scale_factor,
+                    minNeighbors=min_neighbors,
+                    minSize=(40, 40),
+                )
+                for (x, y, w, h) in faces:
+                    detected.append((int(x), int(y), int(w), int(h)))
+
+    if not detected:
+        return []
+
+    # Merge overlapping boxes and keep the largest distinct faces
+    detected.sort(key=lambda box: box[2] * box[3], reverse=True)
+    merged = []
+    for box in detected:
+        x, y, w, h = box
+        cx, cy = x + w / 2, y + h / 2
+        overlaps = False
+        for mx, my, mw, mh in merged:
+            mcx, mcy = mx + mw / 2, my + mh / 2
+            dist = ((cx - mcx) ** 2 + (cy - mcy) ** 2) ** 0.5
+            if dist < min(w, h) * 0.35:
+                overlaps = True
+                break
+        if not overlaps:
+            merged.append(box)
+    return merged
+
+def analyze_face_synthetic_artifacts(img, x, y, w, h):
+    """
+    Heuristic analysis of a face crop for GAN / deepfake-style artifacts.
+    Returns a suspicion score from 0-60 (higher = more likely synthetic).
+    """
+    height, width = img.shape[:2]
+    x1, y1 = max(0, x), max(0, y)
+    x2, y2 = min(width, x + w), min(height, y + h)
+    face = img[y1:y2, x1:x2]
+    if face.size == 0 or face.shape[0] < 40 or face.shape[1] < 40:
+        return 0
+
+    gray_face = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+    fh, fw = gray_face.shape
+    suspicion = 0
+
+    # Left-right asymmetry (common in generated portraits)
+    mid = fw // 2
+    left = gray_face[:, :mid].astype(np.float32)
+    right = cv2.flip(gray_face[:, fw - mid:], 1).astype(np.float32)
+    min_w = min(left.shape[1], right.shape[1])
+    if min_w > 0:
+        asymmetry = np.mean(np.abs(left[:, :min_w] - right[:, :min_w]))
+        if asymmetry > 10:
+            suspicion += 12
+        if asymmetry > 18:
+            suspicion += 8
+
+    # Abnormal bright specks in eye region (GAN highlight artifact)
+    eye_band = gray_face[int(fh * 0.18):int(fh * 0.48), :]
+    if eye_band.size > 0:
+        bright_ratio = float(np.mean(eye_band > 195))
+        very_bright_ratio = float(np.mean(eye_band > 220))
+        if bright_ratio > 0.015:
+            suspicion += 18
+        if very_bright_ratio > 0.006:
+            suspicion += 10
+
+    # Uneven channel texture (color bleeding in synthetic skin)
+    b, g, r = cv2.split(face)
+    channel_stds = [float(np.std(b)), float(np.std(g)), float(np.std(r))]
+    if max(channel_stds) - min(channel_stds) > 12:
+        suspicion += 12
+
+    # Local texture: overly smooth patches mixed with noisy patches
+    lap = cv2.Laplacian(gray_face, cv2.CV_64F)
+    lap_var = float(lap.var())
+    if 80 < lap_var < 320:
+        block_vars = []
+        step_y, step_x = max(fh // 3, 1), max(fw // 3, 1)
+        for by in range(0, fh - step_y, step_y):
+            for bx in range(0, fw - step_x, step_x):
+                patch = lap[by:by + step_y, bx:bx + step_x]
+                block_vars.append(float(patch.var()))
+        if block_vars and max(block_vars) > min(block_vars) * 2.5:
+            suspicion += 14
+
+    # High-frequency FFT energy outside the low-frequency center
+    float_face = gray_face.astype(np.float32)
+    spectrum = np.fft.fftshift(np.fft.fft2(float_face))
+    magnitude = np.log1p(np.abs(spectrum))
+    ch, cw = magnitude.shape
+    cy, cx = ch // 2, cw // 2
+    radius = max(min(ch, cw) // 8, 4)
+    y_grid, x_grid = np.ogrid[:ch, :cw]
+    center_mask = (y_grid - cy) ** 2 + (x_grid - cx) ** 2 <= radius ** 2
+    center_energy = float(np.mean(magnitude[center_mask]))
+    outer_energy = float(np.mean(magnitude[~center_mask]))
+    if center_energy > 0 and outer_energy / center_energy > 0.55:
+        suspicion += 12
+
+    # Mouth/lip discoloration band
+    mouth_band = face[int(fh * 0.62):int(fh * 0.88), int(fw * 0.2):int(fw * 0.8)]
+    if mouth_band.size > 0:
+        mouth_hsv = cv2.cvtColor(mouth_band, cv2.COLOR_BGR2HSV)
+        saturation = mouth_hsv[:, :, 1]
+        if float(np.std(saturation)) > 45:
+            suspicion += 8
+
+    return min(suspicion, 60)
+
+def analyze_portrait_frame(img):
+    """
+    When detectors fail on a tight face portrait, analyze the main subject region.
+    """
+    height, width = img.shape[:2]
+    if height < 180 or width < 180:
+        return 0, None
+
+    aspect = width / max(height, 1)
+    if not (0.55 <= aspect <= 1.6):
+        return 0, None
+
+    margin_x = int(width * 0.07)
+    margin_y = int(height * 0.04)
+    box = (margin_x, margin_y, width - 2 * margin_x, height - 2 * margin_y)
+    score = analyze_face_synthetic_artifacts(img, *box)
+    return score, box
+
+def _append_opencv_face_results(img, face_boxes, face_analyses, score):
+    """Score detected face boxes and return updated score."""
+    face_count = len(face_boxes)
+    for (x, y, w, h) in face_boxes:
+        synthetic_score = analyze_face_synthetic_artifacts(img, x, y, w, h)
+        is_real = synthetic_score < 22
+        if synthetic_score >= 22:
+            score += min(synthetic_score, 45)
+            print(f"      ⚠️ Face artifact score: {synthetic_score}")
+        face_analyses.append({
+            'age': 'unknown',
+            'gender': 'unknown',
+            'gender_confidence': 0,
+            'dominant_emotion': 'unknown',
+            'is_real': is_real,
+            'antispoof_score': synthetic_score,
+            'face_area': w * h,
+            'synthetic_score': synthetic_score,
+        })
+
+    if face_count >= 2:
+        score += 35
+        print("   ⚠️ Multiple faces detected - suspicious composite image")
+    elif face_count == 1:
+        score += 15
+    return score, face_count
+
+def should_flag_deepfake(score, face_count=0):
+    """Consistent threshold for marking an image as suspicious."""
+    if face_count >= 2:
+        return score >= 35
+    return score >= 40
+
+def detect_faces_mtcnn(img):
+    """Optional TensorFlow-based fallback when OpenCV finds nothing."""
+    try:
+        from mtcnn import MTCNN
+        detector = MTCNN()
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        faces = detector.detect_faces(rgb)
+        boxes = []
+        for face in faces:
+            x, y, w, h = face['box']
+            boxes.append((max(0, x), max(0, y), max(0, w), max(0, h)))
+        return boxes
+    except Exception as e:
+        print(f"   MTCNN fallback unavailable: {e}")
+        return []
+
 # ============= DEEPFAKE DETECTION WITH FALLBACK HEURISTICS =============
 def detect_deepfake(filepath):
     """
@@ -1022,39 +1290,64 @@ def detect_deepfake(filepath):
             except Exception as e:
                 print(f"   DeepFace analysis failed: {e}")
 
-        # Fallback heuristic when DeepFace is unavailable or weak
+        # OpenCV face detection when DeepFace did not populate results
         if not face_analyses:
-            try:
-                from mtcnn import MTCNN
-                detector = MTCNN()
-                rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                faces = detector.detect_faces(rgb)
-                if faces:
-                    face_count = len(faces)
-                    print(f"   Detected {face_count} face(s) with MTCNN")
-                    for face in faces:
-                        x, y, w, h = face['box']
-                        face_analyses.append({
-                            'age': 'unknown',
-                            'gender': 'unknown',
-                            'gender_confidence': 0,
-                            'dominant_emotion': 'unknown',
-                            'is_real': True,
-                            'antispoof_score': 0,
-                            'face_area': w * h
-                        })
+            opencv_faces = detect_faces_opencv(gray, img)
+            if opencv_faces:
+                face_count = len(opencv_faces)
+                print(f"   Detected {face_count} face(s) with OpenCV")
+                score, face_count = _append_opencv_face_results(
+                    img, opencv_faces, face_analyses, score
+                )
+            else:
+                print("   No faces detected by OpenCV")
 
-                    if face_count >= 2:
-                        score += 45
-                        print("   ⚠️ Multiple faces detected - suspicious composite image")
-                    else:
-                        score += 25
+        # Portrait-style image: analyze the main subject region if still no face box
+        if not face_analyses:
+            portrait_score, portrait_box = analyze_portrait_frame(img)
+            if portrait_score >= 18 and portrait_box:
+                x, y, w, h = portrait_box
+                face_count = 1
+                print(f"   Portrait-region artifact score: {portrait_score}")
+                score += min(portrait_score + 18, 55)
+                face_analyses.append({
+                    'age': 'unknown',
+                    'gender': 'unknown',
+                    'gender_confidence': 0,
+                    'dominant_emotion': 'unknown',
+                    'is_real': portrait_score < 22,
+                    'antispoof_score': portrait_score,
+                    'face_area': w * h,
+                    'synthetic_score': portrait_score,
+                })
+
+        # Last resort: MTCNN only if OpenCV also found nothing
+        if not face_analyses:
+            mtcnn_faces = detect_faces_mtcnn(img)
+            if mtcnn_faces:
+                face_count = len(mtcnn_faces)
+                print(f"   Detected {face_count} face(s) with MTCNN")
+                for (x, y, w, h) in mtcnn_faces:
+                    synthetic_score = analyze_face_synthetic_artifacts(img, x, y, w, h)
+                    face_analyses.append({
+                        'age': 'unknown',
+                        'gender': 'unknown',
+                        'gender_confidence': 0,
+                        'dominant_emotion': 'unknown',
+                        'is_real': synthetic_score < 22,
+                        'antispoof_score': synthetic_score,
+                        'face_area': w * h,
+                        'synthetic_score': synthetic_score,
+                    })
+                    if synthetic_score >= 22:
+                        score += min(synthetic_score, 40)
+                if face_count >= 2:
+                    score += 35
                 else:
-                    score += 20
-                    print("   ⚠️ No faces detected by fallback face detector")
-            except Exception as e:
-                print(f"   MTCNN fallback failed: {e}")
-                score += 20
+                    score += 15
+            else:
+                score += 15
+                print("   ⚠️ No faces detected by any detector")
 
         # Heuristic checks for suspicious image quality/common composite artifacts
         if laplacian_var < 100:
@@ -1086,6 +1379,14 @@ def detect_deepfake(filepath):
         if face_count == 0 and (laplacian_var < 100 or contrast < 35 or brightness < 55 or brightness > 200):
             score = max(score, 55)
             print("   ⚠️ Heuristic fallback triggered - rating as suspicious")
+
+        # Portrait-shaped image with no detected face is mildly suspicious
+        img_h, img_w = gray.shape[:2]
+        if face_count == 0 and img_h > 200 and img_w > 200:
+            aspect = img_w / max(img_h, 1)
+            if 0.5 <= aspect <= 1.4:
+                score = max(score, 48)
+                print("   ⚠️ Portrait-shaped image with no detected face")
 
         score = min(max(score, 20), 100)
         print(f"\n📊 FINAL DEEPFAKE SCORE: {score}%")
@@ -1263,7 +1564,17 @@ def upload_file():
 
     # ===== DETECT DEEPFAKES WITH CONFIDENCE =====
     deepfake_confidence, face_analyses = detect_deepfake(static_filepath)
-    deepfake_detected = deepfake_confidence >= 45
+    deepfake_detected = should_flag_deepfake(
+        deepfake_confidence,
+        face_count=len(face_analyses),
+    )
+    logger.info(
+        'Deepfake analysis [%s]: score=%s%% faces=%s detected=%s',
+        DEEPFAKE_ENGINE_VERSION,
+        deepfake_confidence,
+        len(face_analyses),
+        deepfake_detected,
+    )
 
     # Calculate processing time
     processing_time = time.time() - start_time
@@ -1699,7 +2010,41 @@ def debug_deepfake_upload():
     return html
 
 if __name__ == '__main__':
+    import socket
+    import sys
+
+    def _port_available(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(('127.0.0.1', port))
+                return True
+            except OSError:
+                return False
+
     with app.app_context():
         db.create_all()
+    logger.info('HerLens deepfake engine: %s', DEEPFAKE_ENGINE_VERSION)
+    logger.info('App file: %s', Path(__file__).resolve())
+    logger.info('YuNet model ready: %s', bool(_ensure_yunet_model()))
+
+    run_port = int(os.getenv('FLASK_PORT', '5000'))
+    if not _port_available(run_port):
+        fallback_port = run_port + 1
+        if _port_available(fallback_port):
+            logger.warning(
+                'Port %s is already in use by old server(s). Starting on http://127.0.0.1:%s instead.',
+                run_port,
+                fallback_port,
+            )
+            run_port = fallback_port
+        else:
+            logger.error(
+                'Ports %s and %s are in use. End extra python.exe processes in Task Manager, then restart.',
+                run_port,
+                fallback_port,
+            )
+            sys.exit(1)
+
+    logger.info('Open the app at http://127.0.0.1:%s', run_port)
     debug_mode = env_bool('FLASK_DEBUG', True)
-    app.run(debug=debug_mode)
+    app.run(debug=debug_mode, port=run_port)
